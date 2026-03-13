@@ -1,89 +1,61 @@
-name: Build Wireless Router ImmortalWrt 24.10.x (512M Mod)
+name: 构建 AX6000-512M 纯净复活包
 
 on:
   workflow_dispatch:
     inputs:
       profile:
-        type: choice
-        description: "请选择型号 (硬改512M闪存务必选 ubootmod)"
+        type: select
+        description: "型号(大分区选 ubootmod)"
         required: true
         options:
           - xiaomi_redmi-router-ax6000-ubootmod
           - xiaomi_redmi-router-ax6000-stock
-          - glinet_gl-mt6000
         default: xiaomi_redmi-router-ax6000-ubootmod
       custom_router_ip:
         description: "管理地址"
         required: true
-        default: "192.168.100.1"
-      enable_store:
-        description: "集成 store 商店"
-        required: false
-        type: boolean
-        default: true
-      include_docker:
-        description: "是否编译 Docker"
-        required: true
-        default: 'yes'
-        type: choice
-        options:
-          - 'yes'
-          - 'no'
+        default: "10.0.0.2"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set executable permissions
-        run: chmod +x ${{ github.workspace }}/mediatek-filogic/build24.sh
-      
-      - name: Save Custom IP
+      - name: Prepare Workspace
         run: |
           mkdir -p "${{ github.workspace }}/custom"
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
 
-      - name: Build Wireless ImmortalWrt (Auto-Patch 512M)
+      - name: Build 23.05 Stable (512M Mod)
         run: |
           profile="${{ github.event.inputs.profile }}"
-          include_docker="${{ github.event.inputs.include_docker }}"
+          # 强制锁定最稳的 23.05.3 标签
+          tag="mediatek-filogic-openwrt-23.05.3"
           
-          # 强制锁定 24.10.5 稳定内核，不再降级到 23.05
-          tag="mediatek-filogic-openwrt-24.10.5"
-          echo "platform=mediatek/filogic" >> $GITHUB_ENV
-
-          # 核心补丁逻辑：在进入 Docker 编译前，定义一个 Patch 脚本
-          # 该脚本会修改 ImageBuilder 内部的分区限制和 DTS
           cat << 'EOF' > patch_512m.sh
-          echo "--- 开始硬改补丁流程 ---"
-          # 1. 查找并修改所有的 filogic.mk，将镜像上限改为 500MB
+          echo "--- 应用大分区补丁 ---"
           find . -name "filogic.mk" | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
-          # 2. 查找并修改所有设备树文件，将原有的 100M/110M 布局改为 480M 布局
           find . -name "*.dts*" | xargs sed -i 's/104448k/491520k/g'
           find . -name "*.dts*" | xargs sed -i 's/112640k/491520k/g'
           echo "--- 补丁应用成功 ---"
           EOF
 
-          # 启动 Docker 并执行：先运行补丁，再执行原有的 build.sh
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
-            -v "${{ github.workspace }}/glinet:/home/build/immortalwrt/files/etc/uci-defaults" \
             -v "${{ github.workspace }}/custom:/home/build/immortalwrt/files/etc/config" \
-            -v "${{ github.workspace }}/shell:/home/build/immortalwrt/shell" \
             -v "${{ github.workspace }}/mediatek-filogic/build24.sh:/home/build/immortalwrt/build.sh" \
             -v "${{ github.workspace }}/patch_512m.sh:/home/build/immortalwrt/patch_512m.sh" \
             -e PROFILE=$profile \
-            -e INCLUDE_DOCKER=$include_docker \
+            -e INCLUDE_DOCKER='不' \
             immortalwrt/imagebuilder:$tag /bin/bash -c "bash /home/build/immortalwrt/patch_512m.sh && bash /home/build/immortalwrt/build.sh"
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}-512M
-          name: AX6000-512M-Flash-Edition
+          tag_name: AX6000-23.05-PURE
+          name: AX6000-23.05-大分区纯净版
           files: ${{ github.workspace }}/bin/targets/mediatek/filogic/*
           token: ${{ secrets.GITHUB_TOKEN }}
