@@ -1,20 +1,68 @@
-name: 构建 AX6000-512M 纯净复活包
+name: Build Wireless Router ImmortalWrt 24.10.x
 
 on:
   workflow_dispatch:
     inputs:
       profile:
-        type: select
-        description: "型号(大分区选 ubootmod)"
+        type: choice
+        description: "请选择mtk路由器型号"
         required: true
         options:
-          - xiaomi_redmi-router-ax6000-ubootmod
+          - glinet_gl-mt2500
+          - glinet_gl-mt3000
+          - glinet_gl-mt6000
+          - glinet_gl-axt1800
+          - glinet_gl-ax1800
+          - glinet_gl-b2200
+          - glinet_gl-x3000
+          - glinet_gl-xe3000
+          - huasifei_wh3000-emmc
+          - cudy_tr3000-v1
+          - cudy_tr3000-v1-ubootmod
+          - cudy_tr3000-256mb-v1
+          - jcg_q30-pro
+          - jcg_q30
+          - jcg_q30-ubootmod
+          - jdcloud_re-cp-03
+          - xiaomi_mi-router-ax3000t
+          - xiaomi_mi-router-ax3000t-ubootmod
+          - xiaomi_mi-router-wr30u-stock
+          - xiaomi_mi-router-wr30u-ubootmod
+          - xiaomi_mi-router-wr30u-112m-nmbm
+          - xiaomi_redmi-router-ax6000
           - xiaomi_redmi-router-ax6000-stock
+          - xiaomi_redmi-router-ax6000-ubootmod
+          - qnap_301w
+          - redmi_ax6
+          - redmi_ax6-stock
+          - xiaomi_redmi-router-ax6s
+          - spectrum_sax1v1k
+          - tplink_eap660hd-v1
+          - xiaomi_ax3600
+          - xiaomi_ax3600-stock
+          - xiaomi_ax9000
+          - xiaomi_ax9000-stock
+          - cmcc_a10-stock
+          - cmcc_a10-ubootmod
+          - cmcc_rax3000m
+          - cmcc_rax3000me
+          - cmcc_rax3000m-emmc-ubootmod
+          - cmcc_rax3000m-nand-ubootmod
+          - imou_lc-hx3001-ubootmod
+          - qihoo_360t7-ubootmod
         default: xiaomi_redmi-router-ax6000-ubootmod
       custom_router_ip:
-        description: "管理地址"
+        description: "请设置路由器的管理地址"
         required: true
-        default: "10.0.0.2"
+        default: "192.168.100.1"
+      include_docker:
+        description: "是否编译 Docker 插件"
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
 
 jobs:
   build:
@@ -23,39 +71,51 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Prepare Workspace
+      - name: Set executable permissions
+        run: chmod +x ${{ github.workspace }}/mediatek-filogic/build24.sh
+      
+      - name: Save Custom Router IP
         run: |
           mkdir -p "${{ github.workspace }}/custom"
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
 
-      - name: Build 23.05 Stable (512M Mod)
+      - name: Build Wireless ImmortalWrt
         run: |
           profile="${{ github.event.inputs.profile }}"
-          # 强制锁定最稳的 23.05.3 标签
-          tag="mediatek-filogic-openwrt-23.05.3"
-          
-          cat << 'EOF' > patch_512m.sh
-          echo "--- 应用大分区补丁 ---"
-          find . -name "filogic.mk" | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
-          find . -name "*.dts*" | xargs sed -i 's/104448k/491520k/g'
-          find . -name "*.dts*" | xargs sed -i 's/112640k/491520k/g'
-          echo "--- 补丁应用成功 ---"
-          EOF
+          include_docker="${{ github.event.inputs.include_docker }}"
+          echo "platform=mediatek/filogic" >> $GITHUB_ENV
 
+          # 确定版本标签
+          case "$profile" in
+              xiaomi_redmi-router-ax6000 | xiaomi_redmi-router-ax6000-ubootmod | xiaomi_redmi-router-ax6000-stock)
+                  tag=mediatek-filogic-openwrt-23.05.4
+                  cp ${{ github.workspace }}/mediatek-filogic/build23.sh ${{ github.workspace }}/mediatek-filogic/build24.sh
+                  ;;
+              *)
+                  tag=mediatek-filogic-openwrt-24.10.5
+                  ;;
+          esac
+
+          # 【唯一改动点】在构建前对 ImageBuilder 进行 512M 补丁处理
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
             -v "${{ github.workspace }}/custom:/home/build/immortalwrt/files/etc/config" \
             -v "${{ github.workspace }}/mediatek-filogic/build24.sh:/home/build/immortalwrt/build.sh" \
-            -v "${{ github.workspace }}/patch_512m.sh:/home/build/immortalwrt/patch_512m.sh" \
             -e PROFILE=$profile \
-            -e INCLUDE_DOCKER='不' \
-            immortalwrt/imagebuilder:$tag /bin/bash -c "bash /home/build/immortalwrt/patch_512m.sh && bash /home/build/immortalwrt/build.sh"
+            -e INCLUDE_DOCKER=$include_docker \
+            immortalwrt/imagebuilder:$tag /bin/bash -c "
+              echo '应用 512M 分区补丁...'
+              find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
+              find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
+              find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
+              bash /home/build/immortalwrt/build.sh
+            "
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: AX6000-23.05-PURE
-          name: AX6000-23.05-大分区纯净版
+          tag_name: ${{ github.event.inputs.profile }}
+          name: ImmortalWrt-AX6000-512M
           files: ${{ github.workspace }}/bin/targets/mediatek/filogic/*
           token: ${{ secrets.GITHUB_TOKEN }}
