@@ -5,7 +5,7 @@ on:
     inputs:
       profile:
         type: choice
-        description: "请选择mtk路由器型号"
+        description : "请选择mtk路由器型号"
         required: true
         options:
           - glinet_gl-mt2500
@@ -28,7 +28,7 @@ on:
           - xiaomi_mi-router-ax3000t-ubootmod
           - xiaomi_mi-router-wr30u-stock
           - xiaomi_mi-router-wr30u-ubootmod
-          - xiaomi_mi-router-wr30u-112m-nmbm
+          - xiaomi_mi-路由器-wr30u-112m-nmbm
           - xiaomi_redmi-router-ax6000
           - xiaomi_redmi-router-ax6000-stock
           - xiaomi_redmi-router-ax6000-ubootmod
@@ -52,7 +52,7 @@ on:
           - qihoo_360t7-ubootmod
         default: xiaomi_redmi-router-ax6000-ubootmod
       custom_router_ip:
-        description: "请设置路由器的管理地址"
+        description : "请设置路由器的管理地址"
         required: true
         default: "192.168.100.1"
       include_docker:
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: 设置可执行权限
         run: chmod +x ${{ github.workspace }}/mediatek-filogic/build*.sh
@@ -79,7 +79,7 @@ jobs:
           mkdir -p "${{ github.workspace }}/custom"
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
 
-      - name: 构建 ImmortalWrt 固件
+      - name: 构建无线 ImmortalWrt
         run: |
           profile="${{ github.event.inputs.profile }}"
           include_docker="${{ github.event.inputs.include_docker }}"
@@ -93,40 +93,39 @@ jobs:
                   tag=mediatek-filogic-openwrt-24.10.5
                   ;;
           esac
-          
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
             -v "${{ github.workspace }}/custom:/home/build/immortalwrt/files/etc/config" \
             -v "${{ github.workspace }}/mediatek-filogic/build24.sh:/home/build/immortalwrt/build.sh" \
-            -e PROFILE="$profile" \
-            -e INCLUDE_DOCKER="$include_docker" \
+            -e PROFILE=$profile \
+            -e INCLUDE_DOCKER=$include_docker \
             immortalwrt/imagebuilder:$tag /bin/bash -c "
-            # 核心：AX6000 128M 强制改为 512M 闪存布局
-            find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
-            find . -name '*.dts*' | xargs sed -i 's/reg = <0x600000 0x6e00000>/reg = <0x600000 0x1ea00000>/g'
-            find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
-            find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
-            
-            # 开启工厂固件支持
-            echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
-            echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
-            
-            # 开始编译
-            bash /home/build/immortalwrt/build.sh
-            
-            # 自动生成可直接刷机的 factory.bin 固件
-            cd bin/targets/mediatek/filogic/ || exit 1
-            for f in *ax6000*sysupgrade.itb; do
-                [ -f "\$f" ] && cp "\$f" "\${f%-sysupgrade.itb}-squashfs-factory.bin"
-            done
-          "
+              # 1.注入512M大逻辑 (只改这里，其他完全不动)
+              find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
+              find . -name '*.dts*' | xargs sed -i 's/reg = <0x600000 0x6e00000>/reg = <0x600000 0x1ea00000>/g'
+              find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
+              find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
+              
+              # 2. 注入工厂开关
+              echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
+              echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
+              
+              # 3.开始编译
+              bash /home/build/immortalwrt/build.sh
+              
+              # 4.【高能操作】既然不给BIN，我就强行把ITB改名成BIN
+              cd bin/targets/mediatek/filogic/
+              for f in *ax6000*sysupgrade.itb; do
+                cp "$f" "${f%-sysupgrade.itb}-squashfs-factory.bin"
+              done
+            "
 
-      - name: 上传编译好的固件
-        uses: softprops/gh-release@v2.2.1
+      - name: 上传版本
+        uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}-512G-FIX-${{ github.run_id }}
-          name: REDMI_AX6000_512M_FULL_FIRMWARE
+          tag_name : ${{ github.event.inputs.profile }}-FIXED-${{ github.run_id }}
+          name: FINAL-FIX-AX6000-FACTORY-BIN
           files: |
             bin/targets/mediatek/filogic/*.bin
             bin/targets/mediatek/filogic/*.itb
