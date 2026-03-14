@@ -85,7 +85,6 @@ jobs:
           include_docker="${{ github.event.inputs.include_docker }}"
           echo "platform=mediatek/filogic" >> $GITHUB_ENV
 
-          # 确定版本标签
           case "$profile" in
               xiaomi_redmi-router-ax6000 | xiaomi_redmi-router-ax6000-ubootmod | xiaomi_redmi-router-ax6000-stock)
                   tag=mediatek-filogic-openwrt-23.05.4
@@ -96,7 +95,6 @@ jobs:
                   ;;
           esac
 
-          # 【唯一改动点】在构建前对 ImageBuilder 进行 512M 补丁处理
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
@@ -105,17 +103,19 @@ jobs:
             -e PROFILE=$profile \
             -e INCLUDE_DOCKER=$include_docker \
             immortalwrt/imagebuilder:$tag /bin/bash -c "
-              echo '应用 512M 分区补丁...'
+              # 在不修改 build.sh 源码的前提下，直接在内存环境里改掉分区定义
               find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
               find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
               find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
+              
+              # 改完立刻执行你原有的脚本
               bash /home/build/immortalwrt/build.sh
             "
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}
-          name: ImmortalWrt-AX6000-512M
+          tag_name: ${{ github.event.inputs.profile }}-${{ github.run_id }}
+          name: ImmortalWrt-AX6000-512M-Fixed
           files: ${{ github.workspace }}/bin/targets/mediatek/filogic/*
           token: ${{ secrets.GITHUB_TOKEN }}
