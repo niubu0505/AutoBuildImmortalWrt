@@ -1,4 +1,4 @@
-Name: Build Wireless Router ImmortalWrt 24.10.x
+name: Build Wireless Router ImmortalWrt 24.10.x
 
 on:
   workflow_dispatch:
@@ -103,26 +103,24 @@ jobs:
             -e PROFILE=$profile \
             -e INCLUDE_DOCKER=$include_docker \
             immortalwrt/imagebuilder:$tag /bin/bash -c "
-              # 1. 注入 512M 补丁逻辑
               find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
               find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
               find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
               
-              # 2. 强力插入 Factory .bin 生成开关 (核心补丁)
               mkdir -p .tmp
               echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
               echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
               
-              # 3. 执行编译
               bash /home/build/immortalwrt/build.sh
             "
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile-fixed }}-${{ github.run_id }}
+          tag_name: ${{ github.event.inputs.profile }}-${{ github.run_id }}
           name: ImmortalWrt-AX6000-512M-FIXED-BIN
           files: |
             bin/targets/mediatek/filogic/*.bin
             bin/targets/mediatek/filogic/*.itb
-            bin/targets/mediatek/filogic/
+            bin/targets/mediatek/filogic/*.ubi
+          token: ${{ secrets.GITHUB_TOKEN }}
