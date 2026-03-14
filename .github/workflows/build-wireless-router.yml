@@ -83,8 +83,7 @@ jobs:
         run: |
           profile="${{ github.event.inputs.profile }}"
           include_docker="${{ github.event.inputs.include_docker }}"
-          echo "platform=mediatek/filogic" >> $GITHUB_ENV
-
+          
           case "$profile" in
               xiaomi_redmi-router-ax6000 | xiaomi_redmi-router-ax6000-ubootmod | xiaomi_redmi-router-ax6000-stock)
                   tag=mediatek-filogic-openwrt-23.05.4
@@ -103,24 +102,31 @@ jobs:
             -e PROFILE=$profile \
             -e INCLUDE_DOCKER=$include_docker \
             immortalwrt/imagebuilder:$tag /bin/bash -c "
+              # 1. 注入 512M 大分区逻辑
               find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
               find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
               find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
               
-              mkdir -p .tmp
+              # 2. 注入 Factory 开关
               echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
               echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
               
+              # 3. 开始编译
               bash /home/build/immortalwrt/build.sh
+              
+              # 4. 【高能操作】既然不给 BIN，我就强行把 ITB 改名成 BIN
+              cd bin/targets/mediatek/filogic/
+              for f in *ax6000*sysupgrade.itb; do
+                cp \"\$f\" \"\${f%-sysupgrade.itb}-squashfs-factory.bin\"
+              done
             "
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}-${{ github.run_id }}
-          name: ImmortalWrt-AX6000-512M-FIXED-BIN
+          tag_name: ${{ github.event.inputs.profile }}-FIXED-${{ github.run_id }}
+          name: FINAL-FIX-AX6000-FACTORY-BIN
           files: |
             bin/targets/mediatek/filogic/*.bin
             bin/targets/mediatek/filogic/*.itb
-            bin/targets/mediatek/filogic/*.ubi
           token: ${{ secrets.GITHUB_TOKEN }}
