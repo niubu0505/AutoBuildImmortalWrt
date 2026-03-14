@@ -1,4 +1,4 @@
-name: Build Wireless Router ImmortalWrt 24.10.x
+name: 构建 ImmortalWrt 24.10.x 无线路由器
 
 on:
   workflow_dispatch:
@@ -58,28 +58,28 @@ on:
       include_docker:
         description: "是否编译 Docker 插件"
         required: true
-        default: 'no'
+        default: '否'
         type: choice
         options:
-          - 'yes'
-          - 'no'
+          - '是的'
+          - '否'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-      - name: Set executable permissions
+      - name: 设置可执行权限
         run: chmod +x ${{ github.workspace }}/mediatek-filogic/build*.sh
-      
-      - name: Save Custom Router IP
+
+      - name: 保存自定义路由器 IP
         run: |
           mkdir -p "${{ github.workspace }}/custom"
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
 
-      - name: Build Wireless ImmortalWrt
+      - name: 构建 ImmortalWrt 固件
         run: |
           profile="${{ github.event.inputs.profile }}"
           include_docker="${{ github.event.inputs.include_docker }}"
@@ -93,39 +93,40 @@ jobs:
                   tag=mediatek-filogic-openwrt-24.10.5
                   ;;
           esac
-
+          
           docker run --rm -i \
             --user root \
             -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
             -v "${{ github.workspace }}/custom:/home/build/immortalwrt/files/etc/config" \
             -v "${{ github.workspace }}/mediatek-filogic/build24.sh:/home/build/immortalwrt/build.sh" \
-            -e PROFILE=$profile \
-            -e INCLUDE_DOCKER=$include_docker \
+            -e PROFILE="$profile" \
+            -e INCLUDE_DOCKER="$include_docker" \
             immortalwrt/imagebuilder:$tag /bin/bash -c "
-              # 1. 注入 512M 大分区逻辑
-              find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
-              find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
-              find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
-              
-              # 2. 注入 Factory 开关
-              echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
-              echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
-              
-              # 3. 开始编译
-              bash /home/build/immortalwrt/build.sh
-              
-              # 4. 【高能操作】既然不给 BIN，我就强行把 ITB 改名成 BIN
-              cd bin/targets/mediatek/filogic/
-              for f in *ax6000*sysupgrade.itb; do
-                cp \"\$f\" \"\${f%-sysupgrade.itb}-squashfs-factory.bin\"
-              done
-            "
+            # 核心：AX6000 128M 强制改为 512M 闪存布局
+            find . -name 'filogic.mk' | xargs sed -i 's/IMAGE_SIZE := .*/IMAGE_SIZE := 500000k/g'
+            find . -name '*.dts*' | xargs sed -i 's/reg = <0x600000 0x6e00000>/reg = <0x600000 0x1ea00000>/g'
+            find . -name '*.dts*' | xargs sed -i 's/104448k/491520k/g'
+            find . -name '*.dts*' | xargs sed -i 's/112640k/491520k/g'
+            
+            # 开启工厂固件支持
+            echo 'CONFIG_TARGET_ROOTFS_SQUASHFS=y' >> .config
+            echo 'CONFIG_TARGET_IMAGE_SQUASHFS_FACTORY=y' >> .config
+            
+            # 开始编译
+            bash /home/build/immortalwrt/build.sh
+            
+            # 自动生成可直接刷机的 factory.bin 固件
+            cd bin/targets/mediatek/filogic/ || exit 1
+            for f in *ax6000*sysupgrade.itb; do
+                [ -f "\$f" ] && cp "\$f" "\${f%-sysupgrade.itb}-squashfs-factory.bin"
+            done
+          "
 
-      - name: Upload Release
-        uses: softprops/action-gh-release@v2.2.1
+      - name: 上传编译好的固件
+        uses: softprops/gh-release@v2.2.1
         with:
-          tag_name: ${{ github.event.inputs.profile }}-FIXED-${{ github.run_id }}
-          name: FINAL-FIX-AX6000-FACTORY-BIN
+          tag_name: ${{ github.event.inputs.profile }}-512G-FIX-${{ github.run_id }}
+          name: REDMI_AX6000_512M_FULL_FIRMWARE
           files: |
             bin/targets/mediatek/filogic/*.bin
             bin/targets/mediatek/filogic/*.itb
